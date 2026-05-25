@@ -41,15 +41,21 @@ async def check(args) -> list:
     url = normalize_target(args.target, args.port, args.path, args.tls)
     findings: list = []
     if not url.startswith("wss://"):
+        is_loopback = (args.target.startswith("ws://127.")
+                       or args.target.startswith("ws://localhost")
+                       or args.target.startswith("ws://[::1]"))
         findings.append(Finding(
             check="tls.plaintext",
-            severity="HIGH" if not args.target.startswith("ws://127.")
-                     and not args.target.startswith("ws://localhost") else "INFO",
-            title="WebSocket served over plaintext ws://",
-            detail="All traffic (including auth tokens, sensor data, commands) "
-                   "is exposed to any on-path attacker. Move to wss:// with a "
-                   "valid certificate.",
-            evidence={"url": url},
+            severity="INFO" if is_loopback else "HIGH",
+            confidence="high",
+            title=("WebSocket served over loopback plaintext (local-only, OK)"
+                   if is_loopback
+                   else "WebSocket served over plaintext ws://"),
+            detail=("All traffic (including auth tokens, sensor data, commands) "
+                    "is exposed to any on-path attacker. Move to wss:// with a "
+                    "valid certificate." if not is_loopback
+                    else "Loopback plaintext is acceptable; no on-path threat."),
+            evidence={"url": url, "loopback": is_loopback},
             references=["https://datatracker.ietf.org/doc/html/rfc6455#section-10.6"],
         ))
         return findings
@@ -131,6 +137,7 @@ async def check(args) -> list:
             detail=f"{type(exc).__name__}: {exc}",
             evidence={},
             references=[],
+            confidence="medium",
         ))
 
     return findings

@@ -72,11 +72,12 @@ async def check(args) -> list:
     headers = parse_headers(args.header)
     findings: list = []
 
-    # Baseline: connect with no Origin
+    # Baseline: connect with NO Origin header
     baseline_ok, baseline_info = await _try_origin(
         url, ssl_ctx, headers, "", args.timeout
     )
 
+    # Probe with each forged Origin
     accepted = {}
     for origin in EVIL_ORIGINS:
         ok, info = await _try_origin(url, ssl_ctx, headers, origin, args.timeout)
@@ -84,24 +85,44 @@ async def check(args) -> list:
 
     accepting = [o for o, (ok, _) in accepted.items() if ok]
 
-    if len(accepting) >= 4:
-        sev = "HIGH"
-        title = "No Origin enforcement (likely CSWSH-vulnerable)"
+    # Falsifiability:
+    #   - If baseline (no Origin) was REJECTED but evil Origins are ACCEPTED,
+    #     that's a clear gap (HIGH confidence).
+    #   - If baseline is also accepted, this is a no-Origin-enforcement state
+    #     by design (still CSWSH-relevant, but we can't distinguish "all
+    #     Origins accepted" from "Origin not checked").
+    #   - If everything is rejected, server has either Origin enforcement
+    #     OR a bigger gating problem (e.g. unrelated handshake failure).
+
+    if not baseline_ok and len(accepting) >= 4:
+        sev, conf = "HIGH", "high"
+        title = ("Origin enforcement bypassed: baseline rejected, "
+                 "forged Origins accepted")
+    elif baseline_ok and len(accepting) == len(EVIL_ORIGINS):
+        sev, conf = "HIGH", "high"
+        title = ("No Origin enforcement: every Origin (including "
+                 "attacker.example, null, file://) is accepted")
     elif accepting:
-        sev = "MEDIUM"
-        title = "Partial Origin enforcement"
+        sev, conf = "MEDIUM", "medium"
+        title = (f"Partial Origin enforcement: "
+                 f"{len(accepting)}/{len(EVIL_ORIGINS)} forged Origins accepted")
+    elif baseline_ok and not accepting:
+        sev, conf = "INFO", "high"
+        title = ("Server accepts no-Origin but rejects all forged Origins "
+                 "(possibly Origin allowlist, possibly browser-only filter)")
     else:
-        sev = "INFO"
+        sev, conf = "INFO", "high"
         title = "Origin header is enforced (all evil Origins rejected)"
 
     detail = (
-        f"baseline (no Origin) accepted={baseline_ok}. "
+        f"baseline_no_origin_accepted={baseline_ok} ({baseline_info}). "
         f"{len(accepting)}/{len(EVIL_ORIGINS)} forged Origins accepted: "
-        f"{', '.join(accepting) if accepting else 'none'}"
+        f"{', '.join(accepting) if accepting else 'none'}."
     )
     findings.append(Finding(
         check="cswsh.origin-enforcement",
         severity=sev,
+        confidence=conf,
         title=title,
         detail=detail,
         evidence={"accepted": {k: {"ok": v[0], "info": v[1]}

@@ -80,17 +80,25 @@ async def check(args) -> list:
                     findings.append(Finding(
                         check="compression.large-payload-accepted",
                         severity="MEDIUM",
-                        title=f"Server accepted {size_kb} KiB compressible payload",
-                        detail=f"Amplification ratio ~{int(ratio)}x. "
-                               f"Sent in {elapsed:.1f}ms. Server has no max-message-size "
-                               f"limit OR limit > 1 MiB. Combined with high concurrency "
-                               f"this is a CPU/memory DoS vector.",
+                        confidence="medium",
+                        title=f"Server accepted {size_kb} KiB compressible payload over deflate",
+                        detail=(f"Sent a {size_kb} KiB run of 'A' over a "
+                                f"permessage-deflate WebSocket. Deflate compresses "
+                                f"this to roughly {size_kb * 1024 // 100} bytes "
+                                f"on the wire. The send completed in {elapsed:.1f}ms "
+                                f"and the connection stayed open, meaning the server "
+                                f"buffered the full decompressed payload. Combined "
+                                f"with many concurrent connections this is a "
+                                f"CPU/memory DoS vector. (Confidence: medium; we "
+                                f"observed acceptance, not a crash. To confirm "
+                                f"exploitability, scale workers in the `compression` "
+                                f"attack mode in a lab.)"),
                         evidence={"size_kb": size_kb,
                                   "estimated_wire_bytes": int(size_kb * 1024 / 100),
-                                  "send_ms": round(elapsed, 1)},
+                                  "send_ms": round(elapsed, 1),
+                                  "extensions_seen": ext},
                         references=[
                             "https://nvd.nist.gov/vuln/detail/CVE-2020-7662",
-                            "https://nvd.nist.gov/vuln/detail/CVE-2024-23341",
                             "https://datatracker.ietf.org/doc/html/rfc7692",
                         ],
                     ))

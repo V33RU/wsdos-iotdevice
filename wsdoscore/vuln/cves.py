@@ -1,17 +1,19 @@
-"""Known-CVE detection for popular WebSocket stacks.
+"""Known-CVE fingerprint check for WebSocket stacks.
 
-Each CVE entry has:
-  - id, severity, summary, refs
-  - a probe() coroutine returning a Finding or None
+Every entry in CVE_DB has been verified against NVD: the CVE ID, title,
+affected stack, and severity are confirmed. We deliberately keep this
+list small and accurate rather than long and noisy.
 
-We test by fingerprinting (Server header, behaviour) without exploiting.
-The probe is intentionally non-destructive.
+Detection is *fingerprint-based*: we read the server's response headers
+during the handshake and match the `Server` / `X-Powered-By` strings
+against known signatures. A match is a *hint*, not a confirmed
+exploitable bug; the user must check the actual version manually.
+
+Adding a new CVE here? Verify it on NVD first; do not commit unverified
+entries.
 """
 
 from __future__ import annotations
-
-import asyncio
-from contextlib import suppress
 
 import websockets
 
@@ -24,112 +26,69 @@ from ..common import (
 
 
 # ----------------------------------------------------------------------
-# CVE knowledge base (curated; expand as you encounter new ones)
+# Verified CVE knowledge base (curated; small > big-but-fake)
 # ----------------------------------------------------------------------
+#
+# Schema:
+#   id        : CVE identifier
+#   title     : NVD short title (verbatim)
+#   severity  : NVD/GitHub CVSS bucket (CRITICAL/HIGH/MEDIUM/LOW)
+#   stack     : affected library + version range (per NVD)
+#   header_match : (header_name, substring_to_find_case_insensitive)
+#                  in the server's WS handshake response
+#   refs      : list of canonical URLs
 
 
 CVE_DB = [
     {
         "id": "CVE-2020-7662",
-        "title": "ws (npm) ReDoS via Sec-WebSocket-Extensions",
-        "severity": "HIGH",
-        "stack": "ws (npm) <7.4.6",
+        "title": "websocket-extensions ReDoS via Sec-WebSocket-Extensions header",
+        "severity": "HIGH",                  # CVSS 7.5
+        "stack": "websocket-extensions (Node.js) < 0.1.4 — used by the `ws` package",
+        "header_match": ("Server", "ws"),    # weak hint; verify version manually
         "refs": [
             "https://nvd.nist.gov/vuln/detail/CVE-2020-7662",
-            "https://github.com/websockets/ws/security/advisories/GHSA-6fc8-4gx4-v693",
+            "https://github.com/faye/websocket-extensions-node/security/advisories/GHSA-g78m-2chm-r7qv",
         ],
-        "fingerprint_paths": ["/"],
-        "header_match": ("Server", "ws"),
-    },
-    {
-        "id": "CVE-2024-37890",
-        "title": "ws (npm) DoS via crafted HTTP request headers",
-        "severity": "MEDIUM",
-        "stack": "ws (npm) <8.17.1",
-        "refs": [
-            "https://nvd.nist.gov/vuln/detail/CVE-2024-37890",
-        ],
-        "fingerprint_paths": ["/"],
-        "header_match": ("Server", "ws"),
     },
     {
         "id": "CVE-2021-32640",
-        "title": "ws (npm) prototype pollution via Sec-WebSocket-Extensions",
-        "severity": "MEDIUM",
-        "stack": "ws (npm) 5.x-7.4.5",
-        "refs": ["https://nvd.nist.gov/vuln/detail/CVE-2021-32640"],
-        "fingerprint_paths": ["/"],
+        "title": "ws (npm) ReDoS via crafted Sec-WebSocket-Protocol header",
+        "severity": "MEDIUM",                # CVSS 5.3
+        "stack": "ws (npm) 5.0.0–6.2.1 and 7.0.0–7.4.5",
         "header_match": ("Server", "ws"),
+        "refs": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-32640",
+            "https://github.com/websockets/ws/security/advisories/GHSA-6fc8-4gx4-v693",
+        ],
     },
     {
-        "id": "CVE-2024-23341",
-        "title": "aiohttp WebSocket compression DoS",
-        "severity": "HIGH",
-        "stack": "aiohttp <3.9.2",
-        "refs": ["https://nvd.nist.gov/vuln/detail/CVE-2024-23341"],
-        "fingerprint_paths": ["/"],
-        "header_match": ("Server", "Python/"),
-    },
-    {
-        "id": "CVE-2023-49081",
-        "title": "aiohttp HTTP request smuggling via WebSocket upgrade",
-        "severity": "HIGH",
-        "stack": "aiohttp <3.9.0",
-        "refs": ["https://nvd.nist.gov/vuln/detail/CVE-2023-49081"],
-        "fingerprint_paths": ["/"],
-        "header_match": ("Server", "Python/aiohttp"),
-    },
-    {
-        "id": "CVE-2021-22150",
-        "title": "Kibana WebSocket authentication bypass",
-        "severity": "CRITICAL",
-        "stack": "Kibana <7.13.4",
-        "refs": ["https://nvd.nist.gov/vuln/detail/CVE-2021-22150"],
-        "fingerprint_paths": ["/api/console/proxy", "/bundles/"],
-        "header_match": ("kbn-name", "kibana"),
-    },
-    {
-        "id": "CVE-2018-15598",
-        "title": "ASP.NET SignalR cross-origin WebSocket bypass",
-        "severity": "MEDIUM",
-        "stack": "SignalR <2.4.0",
-        "refs": ["https://nvd.nist.gov/vuln/detail/CVE-2018-15598"],
-        "fingerprint_paths": ["/signalr/connect"],
-        "header_match": ("X-Content-Type-Options", "signalr"),
+        "id": "CVE-2024-37890",
+        "title": "ws (npm) DoS via HTTP requests exceeding server.maxHeadersCount",
+        "severity": "HIGH",                  # CVSS 7.5
+        "stack": "ws (npm) < 5.2.4, 6.2.3, 7.5.10, 8.17.1",
+        "header_match": ("Server", "ws"),
+        "refs": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2024-37890",
+            "https://github.com/websockets/ws/security/advisories/GHSA-3h5v-q93c-6h6q",
+        ],
     },
     {
         "id": "CVE-2023-32695",
-        "title": "Socket.IO client allows untrusted servers to perform DoS",
-        "severity": "HIGH",
-        "stack": "socket.io-parser <4.2.3",
-        "refs": ["https://nvd.nist.gov/vuln/detail/CVE-2023-32695"],
-        "fingerprint_paths": ["/socket.io/"],
-        "header_match": None,
-    },
-    {
-        "id": "CVE-2022-21680",
-        "title": "Marked ReDoS (often reached via WS chat servers)",
-        "severity": "MEDIUM",
-        "stack": "marked <4.0.10",
-        "refs": ["https://nvd.nist.gov/vuln/detail/CVE-2022-21680"],
-        "fingerprint_paths": ["/"],
-        "header_match": None,
-    },
-    # Mongoose embedded web server (common in IoT firmware)
-    {
-        "id": "CVE-2022-32287",
-        "title": "Mongoose embedded WebSocket frame parsing OOB read",
-        "severity": "HIGH",
-        "stack": "Mongoose <7.7",
-        "refs": ["https://nvd.nist.gov/vuln/detail/CVE-2022-32287"],
-        "fingerprint_paths": ["/"],
-        "header_match": ("Server", "Mongoose"),
+        "title": "socket.io-parser DoS via crafted packet (uncaught exception)",
+        "severity": "HIGH",                  # CVSS 7.5
+        "stack": "socket.io-parser 3.4.0–3.4.2, 4.0.4–4.2.2",
+        "header_match": ("Server", "socket.io"),
+        "refs": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2023-32695",
+            "https://github.com/socketio/socket.io-parser/security/advisories/GHSA-cqmj-92xf-r6r9",
+        ],
     },
 ]
 
 
 async def _probe_target(url, ssl_ctx, headers, timeout):
-    """Quick handshake to extract Server header + status."""
+    """Single handshake. Return response headers as dict, or {'_error': '...'}."""
     try:
         async with websockets.connect(
             url,
@@ -155,49 +114,62 @@ async def check(args) -> list:
         findings.append(Finding(
             check="cves.fingerprint-failed",
             severity="INFO",
-            title="Could not fingerprint server for CVE matching",
-            detail=resp_hdrs["_error"],
-            evidence={},
+            title="Could not fingerprint server (handshake failed)",
+            detail=f"No data to match against known CVEs. {resp_hdrs['_error']}",
+            evidence={"error": resp_hdrs["_error"]},
             references=[],
         ))
         return findings
 
-    # Stack the headers low-cased for matching
+    # Lower-case header dict for matching
     lc = {k.lower(): v for k, v in resp_hdrs.items()}
+    server_hdr = lc.get("server", "") or ""
+    xpoweredby = lc.get("x-powered-by", "") or ""
+
+    # Visible to the user regardless
+    findings.append(Finding(
+        check="cves.fingerprint",
+        severity="INFO",
+        title="Server fingerprint captured",
+        detail=f"Server: {server_hdr!r}  X-Powered-By: {xpoweredby!r}",
+        evidence={"server": server_hdr, "x_powered_by": xpoweredby,
+                  "all_response_headers": resp_hdrs},
+        references=[],
+    ))
+
     matched = []
     for entry in CVE_DB:
-        hm = entry.get("header_match")
-        if not hm:
-            continue
-        hname, needle = hm
-        if needle.lower() in lc.get(hname.lower(), "").lower():
+        hname, needle = entry["header_match"]
+        haystack = lc.get(hname.lower(), "") or ""
+        if needle.lower() in haystack.lower():
             matched.append(entry)
 
-    if matched:
-        for entry in matched:
-            findings.append(Finding(
-                check=f"cves.{entry['id'].lower()}",
-                severity=entry["severity"],
-                title=f"Server fingerprint matches {entry['id']}: {entry['title']}",
-                detail=f"Stack: {entry['stack']}. This is a *fingerprint* match, "
-                       "not an active exploitation attempt. Verify version "
-                       "manually before reporting.",
-                evidence={"matched_header": entry["header_match"],
-                          "server_headers": {k: v for k, v in resp_hdrs.items()
-                                             if k.lower() in ("server", "x-powered-by",
-                                                              "kbn-name", "sec-websocket-extensions")}},
-                references=entry["refs"],
-            ))
-    else:
+    if not matched:
         findings.append(Finding(
-            check="cves.no-fingerprint-match",
+            check="cves.no-match",
             severity="INFO",
-            title="No known-CVE fingerprint match",
-            detail=f"Checked {len(CVE_DB)} CVE patterns against server "
-                   f"headers. None matched. Server headers seen: "
-                   f"{ {k: v for k, v in resp_hdrs.items() if k.lower() in ('server', 'x-powered-by')} }",
-            evidence={"checked_cves": len(CVE_DB)},
+            title=f"No header match against {len(CVE_DB)} known WebSocket CVEs",
+            detail=("Fingerprint-only matching is intentionally narrow. "
+                    "Absence of match does not mean the server is patched; "
+                    "verify versions out-of-band."),
+            evidence={"checked": [c["id"] for c in CVE_DB]},
             references=[],
+        ))
+        return findings
+
+    for entry in matched:
+        findings.append(Finding(
+            check=f"cves.{entry['id'].lower()}",
+            severity=entry["severity"],
+            title=f"Header fingerprint suggests {entry['id']}: {entry['title']}",
+            detail=(f"Stack: {entry['stack']}. This is a *hint* from "
+                    f"matching `{entry['header_match'][0]}` containing "
+                    f"`{entry['header_match'][1]}`, NOT proof. Confirm "
+                    f"installed version against the affected range "
+                    f"before reporting."),
+            evidence={"matched_header": entry["header_match"],
+                      "actual_value": lc.get(entry["header_match"][0].lower())},
+            references=entry["refs"],
         ))
 
     return findings

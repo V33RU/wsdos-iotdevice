@@ -170,11 +170,13 @@ class Finding:
     detail: str
     evidence: dict = field(default_factory=dict)
     references: list = field(default_factory=list)
+    confidence: str = "medium"      # low / medium / high — how sure are we?
 
     def to_dict(self) -> dict:
         return {
             "check": self.check,
             "severity": self.severity,
+            "confidence": self.confidence,
             "title": self.title,
             "detail": self.detail,
             "evidence": self.evidence,
@@ -182,6 +184,48 @@ class Finding:
         }
 
     def pretty(self) -> str:
-        head = f"{severity_label(self.severity)} {color(self.check, 'bold')} {self.title}"
+        conf = color(f"({self.confidence})", "dim")
+        head = (f"{severity_label(self.severity)} {conf} "
+                f"{color(self.check, 'bold')} {self.title}")
         body = f"      {color(self.detail, 'dim')}"
         return head + "\n" + body
+
+
+# ----------------------------------------------------------------------
+# Rate-limit aware pacing (shared by the scan dispatcher)
+# ----------------------------------------------------------------------
+
+
+class Pacer:
+    """Tracks recent connection refusals and inserts adaptive backoff.
+
+    The scan dispatcher calls .wait() between checks. If recent checks
+    saw ConnectionRefused / ConnectionResetError errors, the wait grows
+    exponentially (capped). Otherwise, the wait stays at .base_delay.
+    """
+
+    def __init__(self, base_delay: float = 0.5, max_delay: float = 8.0):
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.consecutive_refusals = 0
+
+    def note_check_result(self, findings_or_error) -> None:
+        """Inspect findings (or an error string) from the last check;
+        bump the refusal counter if there's evidence the device is throttling."""
+        text = str(findings_or_error).lower()
+        if "connectionrefused" in text or "connection refused" in text \
+                or "connectionreset" in text or "connection reset" in text:
+            self.consecutive_refusals += 1
+        else:
+            self.consecutive_refusals = max(0, self.consecutive_refusals - 1)
+
+    async def wait(self) -> float:
+        delay = min(
+            self.base_delay * (2 ** self.consecutive_refusals),
+            self.max_delay,
+        )
+        await asyncio.sleep(delay)
+        return delay
+
+    def is_throttled(self) -> bool:
+        return self.consecutive_refusals >= 2

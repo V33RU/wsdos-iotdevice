@@ -1,6 +1,65 @@
 # Changelog
 
-## v3.0.0 — 2026-05-25
+## v3.1.0 - 2026-05-25
+
+Detection-logic hardening. Removes fabricated content that snuck into v3.0,
+makes every finding falsifiable, and adds adaptive rate-limit handling.
+
+### Changed
+- **CVE registry trimmed from 10 to 4 verified entries.** Removed:
+  CVE-2024-23341 (was claimed aiohttp WS compression DoS; actually a Taiwanese
+  text package HTML injection), CVE-2023-49081 (real aiohttp CVE but not
+  WebSocket-specific), CVE-2021-22150 (claimed Kibana WS auth bypass; actually
+  JS-YAML deserialization), CVE-2018-15598 (claimed SignalR cross-origin;
+  actually Traefik API exposure), CVE-2022-21680 (real marked ReDoS but not
+  WebSocket-specific), CVE-2022-32287 (claimed Mongoose WS frame OOB; actually
+  Apache UIMA path traversal). Kept the 4 confirmed-real ones: CVE-2020-7662,
+  CVE-2021-32640, CVE-2024-37890, CVE-2023-32695.
+- **Preset registry trimmed from 18 to 8 verified entries.** Removed entries
+  I could not verify against vendor docs (`tuya-local`, `hikvision-isapi`,
+  `dahua-snap`, `obd-ws-bridge`, `tesla-firehose`, `open-vehicle-monitoring`,
+  `niagara-n4-bajaws`, `bacnet-ws-gateway`, `modbus-ws-gateway`, `opcua-ws`).
+  Every remaining preset cites its source URL.
+- **Check execution order is now cheap-first**: tls -> cves -> cswsh -> auth
+  -> compression -> smuggling -> frames. Aggressive raw-socket fuzzing runs
+  last so it cannot starve earlier checks when the target rate-limits.
+- **`auth` check no longer fires false `JWT alg:none` finding** when the
+  baseline no-auth handshake was already accepted. Now establishes baseline
+  first and only reports JWT-bypass when baseline was rejected (so the
+  forged-token acceptance is genuinely a new behavior). Also added a
+  counter-test `auth.bearer-anything-accepted` that catches the weaker case
+  of "any Bearer value accepted" so JWT findings can be properly contextualized.
+- **`cswsh` check now reports baseline disposition** and uses a 4-bucket
+  classification: bypass-confirmed / no-enforcement / partial / good.
+- **`tls.plaintext` finding downgraded to INFO for loopback targets** instead
+  of HIGH (`ws://127.x`, `ws://localhost`, `ws://[::1]`).
+- **`frames` check no longer reports HIGH "Server tolerates 5/5 malformed
+  frames"** when the handshake itself failed (no data to interpret).
+
+### Added
+- **`Finding.confidence` field** (low/medium/high). Surfaced in pretty
+  output and JSON. Every existing check assigns confidence based on whether
+  there's a baseline comparison and how strong the evidence is.
+- **`Pacer` class in `common.py`**: tracks consecutive `ConnectionRefused`
+  errors and inserts exponential backoff between checks (capped at 8s).
+- **`--check-delay` flag on `scan`** (default 0.5s): base inter-check delay.
+- **New `scan.rate-limited` and `scan.target-unreachable` summary findings**:
+  the scanner now distinguishes "device rate-limited me mid-scan" (some
+  checks worked, later ones refused) from "target was never up" (every
+  check refused).
+
+### Why this matters
+The v3.0 Crestron MC4-R audit surfaced three classes of false positives
+caused by detection logic that didn't establish a baseline:
+- `auth.jwt-alg-none` CRITICAL fired even though the server was simply
+  accepting any unauthenticated handshake.
+- `frames.rfc6455-compliance` HIGH fired against an unreachable target.
+- `tls.handshake-failed`, `smuggling.error`, `cves.fingerprint-failed`
+  all fired with no real data because the rate-limiter starved them.
+
+v3.1 fixes all three classes.
+
+## v3.0.0 - 2026-05-25
 
 Framework restructure: passive vuln scanning + known-CVE fingerprinting + vendor presets.
 
