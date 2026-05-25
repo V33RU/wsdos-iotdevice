@@ -4,14 +4,14 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.8%2B-blue?style=flat-square&logo=python&logoColor=white"/>
   <img src="https://img.shields.io/badge/asyncio-native-green?style=flat-square"/>
-  <img src="https://img.shields.io/badge/version-3.0.0-purple?style=flat-square"/>
+  <img src="https://img.shields.io/badge/version-3.1.0-purple?style=flat-square"/>
   <img src="https://img.shields.io/badge/license-MIT-orange?style=flat-square"/>
   <img src="https://img.shields.io/badge/use-authorized_only-red?style=flat-square"/>
 </p>
 
 > ⚠️ **Authorized testing only.** This tool is built for IoT security research, red-team engagements, and stress-testing your own embedded devices. Running it against systems you do not own or have explicit written permission to test is illegal in most jurisdictions and unethical everywhere. The author accepts no responsibility for misuse.
 
-`wsdos` started as a 35-line WebSocket connection-flood PoC in 2019. v3.0 turns it into a real framework: passive vulnerability scanning, known-CVE fingerprinting, frame-level fuzzing, vendor presets for the most common IoT / robot / automotive WebSocket endpoints, and the original DoS modes (now async).
+`wsdos` started as a 35-line WebSocket connection-flood PoC in 2019. v3.x is a real framework: passive vulnerability scanning, known-CVE fingerprinting, frame-level fuzzing, vendor presets for the most common IoT / robotics WebSocket endpoints, and the original DoS modes (now async). v3.1 hardened the detection logic so every finding is falsifiable; see CHANGELOG.md.
 
 ## What's included
 
@@ -20,11 +20,11 @@
 |---|---|
 | **`cswsh`** | Missing or weak `Origin` enforcement → Cross-Site WebSocket Hijacking |
 | **`auth`** | Endpoints accepting no auth at all, JWT `alg:none`, tokens in query strings |
-| **`compression`** | `permessage-deflate` amplification (CVE-2020-7662 / CVE-2024-23341 family) |
+| **`compression`** | `permessage-deflate` amplification (CVE-2020-7662 family) |
 | **`frames`** | RFC 6455 violations: unmasked client frames, bad RSV bits, reserved opcodes, oversize length, dangling continuations |
 | **`smuggling`** | HTTP request smuggling at the Upgrade boundary |
 | **`tls`** | Plaintext `ws://`, obsolete TLS versions, weak ciphers, untrusted certs |
-| **`cves`** | Fingerprint matching against 10+ documented WebSocket CVEs (ws npm, aiohttp, Mongoose, Kibana, SignalR, socket.io, marked) |
+| **`cves`** | Fingerprint matching against 4 verified WebSocket CVEs in the `ws` (npm), `websocket-extensions`, and `socket.io-parser` stacks |
 
 ### 5 attack modes (require `--i-have-authorization`)
 | Mode | Pressure pattern |
@@ -72,21 +72,22 @@ python3 wsdos.py probe ws://192.168.1.42:8080/
 python3 wsdos.py scan ws://192.168.1.42:8080/ --format pretty
 ```
 
-Output (pretty):
+Output (pretty, with `confidence` annotation per finding):
 
 ```
 === wsdos scan report ===
-Target: ws://192.168.1.42:8080/
-Findings: 9
+Target: wss://192.168.1.42:8080/
+Findings: 8
 
-Summary: [CRITICAL] 1  [HIGH] 2  [MEDIUM] 1  [INFO] 5
+Summary: [HIGH] 2  [MEDIUM] 1  [INFO] 5
 
-[CRITICAL] auth.jwt-alg-none Server accepted JWT with 'alg: none'
-      A bearer token with header alg=none and claim role=admin was accepted.
-      → https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2015-9235
+[HIGH] (high) cswsh.origin-enforcement No Origin enforcement: every Origin (including attacker.example, null, file://) is accepted
+      baseline_no_origin_accepted=True (ok). 6/6 forged Origins accepted: ...
+      -> https://owasp.org/www-community/attacks/Cross_Site_WebSocket_Hijacking_(CSWSH)
 
-[HIGH] cswsh.origin-enforcement No Origin enforcement (likely CSWSH-vulnerable)
-      baseline (no Origin) accepted=True. 6/6 forged Origins accepted: ...
+[HIGH] (medium) auth.handshake-open WebSocket handshake accepts unauthenticated clients
+      Server completed the handshake with no Authorization / Cookie / X-API-Key header.
+      This is acceptable only if the application enforces auth in the first WS message.
 
 ...
 ```
@@ -109,9 +110,9 @@ python3 wsdos.py preset list
 python3 wsdos.py preset show ros2-rosbridge
 
 # scan with the preset's defaults (right port, path, scheme)
-python3 wsdos.py preset scan shelly 192.168.1.50
+python3 wsdos.py preset scan shelly-gen2-rpc 192.168.1.50
 python3 wsdos.py preset scan ros2-rosbridge 10.0.0.7
-python3 wsdos.py preset scan tesla-firehose owner-api.teslamotors.com --format markdown -o tesla.md
+python3 wsdos.py preset scan home-assistant 192.168.1.100 --format markdown -o ha.md
 ```
 
 ### Reports
@@ -176,19 +177,24 @@ are welcome.
 
 ## Where the WebSocket lives, by device class
 
+Verified preset coverage (everything below has a primary-source citation
+in `wsdoscore/presets.py`):
+
 | Device class | Typical paths / ports | What to test |
 |---|---|---|
-| Smart plugs / relays (Shelly, Tasmota) | `/rpc`, `/ws` on :80 | `auth`, `cswsh` (often no auth at all on LAN) |
+| Shelly Gen2/Gen3 relays | `/rpc` on :80 | `auth`, `cswsh` (often no auth at all on LAN) |
+| Tasmota firmware | `/ws` on :80 | `auth`, `cswsh` |
+| ESPHome dashboard | `/` on :6052 | `auth`, `cswsh` |
 | Home Assistant | `/api/websocket` on :8123 | `auth` (token bypass), `cves` |
-| IP cameras (Hikvision, Dahua) | `/RPC2_Loginws` on :80, `/` on :7681 | `cswsh`, `frames`, `cves` (firmware-specific) |
-| ROS rosbridge | `/` on :9090 | `auth` (default = NONE), `frames`, see [iotsrg/awesome-ros-security](https://github.com/iotsrg/awesome-ros-security) |
+| OctoPrint (3D printer) | `/sockjs/websocket` on :5000 | `cswsh`, `auth` |
+| ROS 1/2 rosbridge | `/` on :9090 | `auth` (default = NONE), `frames`, see [iotsrg/awesome-ros-security](https://github.com/iotsrg/awesome-ros-security) |
 | Foxglove bridge | `/` on :8765 | `auth`, `compression` |
-| OctoPrint | `/sockjs/websocket` on :5000 | `cswsh`, `auth` |
-| OBD-WiFi dongles | `/` on :35000 | `tls.plaintext` (always plain), `auth` (always none) |
-| Tesla mobile firehose | `wss://owner-api.teslamotors.com/streaming/` | `tls`, `auth` (OAuth bearer) |
-| Niagara N4 / BMS | `/baja/ws` on :1911 | `tls` (self-signed default), `cves`, `auth` |
-| OPC UA over WS | `/` on :4843 wss | `tls`, `frames` |
-| Modbus-WS gateways | `/modbus` on :8000 | `auth` (often none), `frames` (binary PDU fuzzing) |
+
+Not yet covered (would welcome PRs with vendor-doc citations): industrial
+fieldbus-over-WS (Modbus / BACnet / OPC UA), automotive (OBD WiFi, Tesla
+firehose, OVMS), IP cameras with proprietary WS bridges, building
+management (Niagara N4). Earlier versions of this README claimed coverage
+of those; on verification the entries were guesses, so v3.1.0 removed them.
 
 ## Architecture
 
