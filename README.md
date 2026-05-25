@@ -257,5 +257,5 @@ MIT, see [LICENSE](LICENSE).
 [@V33RU](https://github.com/V33RU) / [IOTSRG](https://iotsrg.org/)
 
 See also:
-- [iotsrg/awesome-ros-security](https://github.com/iotsrg/awesome-ros-security) — full robotics/ROS security curation
-- [V33RU/awesome-connected-things-sec](https://github.com/V33RU/awesome-connected-things-sec) — IoT / embedded / automotive / ICS resources
+- [iotsrg/awesome-ros-security](https://github.com/iotsrg/awesome-ros-security) , full robotics/ROS security curation
+- [V33RU/awesome-connected-things-sec](https://github.com/V33RU/awesome-connected-things-sec) , IoT / embedded / automotive / ICS resources
