@@ -35,16 +35,18 @@
 | **`payload`** | Send oversized frames (memory pressure) |
 | **`compression`** | Ship highly-compressible payloads (decoder DoS) |
 
-### 18 vendor presets across 7 categories
+### 8 vendor presets across 3 categories (verified against vendor docs)
 | Category | Presets |
 |---|---|
-| `iot-smart-home` | `shelly`, `tasmota`, `esphome`, `home-assistant`, `tuya-local` |
-| `iot-camera` | `hikvision-isapi`, `dahua-snap` |
-| `iot-3dprinter` | `octoprint` |
 | `robotics` | `ros1-rosbridge`, `ros2-rosbridge`, `foxglove-bridge` |
-| `automotive` | `obd-ws-bridge`, `tesla-firehose`, `open-vehicle-monitoring` |
-| `industrial-bms` | `niagara-n4-bajaws`, `bacnet-ws-gateway` |
-| `industrial-scada` | `modbus-ws-gateway`, `opcua-ws` |
+| `iot-smart-home` | `home-assistant`, `esphome-dashboard`, `shelly-gen2-rpc`, `tasmota-console` |
+| `iot-3dprinter` | `octoprint` |
+
+Every preset cites its primary source URL in `wsdoscore/presets.py`. Earlier
+versions of this README listed ~18 presets across 7 categories; that table
+contained guesses for vendors whose protocols I had not verified. v3.1.0
+removed the unverified entries. PRs adding new verified presets (with a
+primary source cite) are welcome.
 
 ## Install
 
@@ -153,20 +155,24 @@ python3 wsdos.py compression wss://device.lan/ws -k -w 4 --payload-size 10485760
 
 ## Known CVEs covered by the `cves` check
 
+Every entry has been verified against NVD. Earlier versions of this README
+listed 10 CVEs; on verification, six of them either pointed to unrelated
+products (Apache UIMA, Traefik, Taiwanese-language packages) or were real
+CVEs but not WebSocket-specific. v3.1.0 trimmed the registry to the four
+that are both real and WebSocket-specific:
+
 | CVE | Stack | Severity |
 |---|---|---|
-| [CVE-2020-7662](https://nvd.nist.gov/vuln/detail/CVE-2020-7662) | `ws` (npm) <7.4.6 — ReDoS via `Sec-WebSocket-Extensions` | HIGH |
-| [CVE-2024-37890](https://nvd.nist.gov/vuln/detail/CVE-2024-37890) | `ws` (npm) <8.17.1 — DoS via crafted HTTP headers | MEDIUM |
-| [CVE-2021-32640](https://nvd.nist.gov/vuln/detail/CVE-2021-32640) | `ws` (npm) 5.x-7.4.5 — prototype pollution | MEDIUM |
-| [CVE-2024-23341](https://nvd.nist.gov/vuln/detail/CVE-2024-23341) | `aiohttp` <3.9.2 — compression DoS | HIGH |
-| [CVE-2023-49081](https://nvd.nist.gov/vuln/detail/CVE-2023-49081) | `aiohttp` <3.9.0 — request smuggling via Upgrade | HIGH |
-| [CVE-2021-22150](https://nvd.nist.gov/vuln/detail/CVE-2021-22150) | Kibana <7.13.4 — WS auth bypass | CRITICAL |
-| [CVE-2018-15598](https://nvd.nist.gov/vuln/detail/CVE-2018-15598) | SignalR <2.4.0 — cross-origin bypass | MEDIUM |
-| [CVE-2023-32695](https://nvd.nist.gov/vuln/detail/CVE-2023-32695) | `socket.io-parser` <4.2.3 — DoS | HIGH |
-| [CVE-2022-21680](https://nvd.nist.gov/vuln/detail/CVE-2022-21680) | `marked` <4.0.10 — ReDoS via WS chat servers | MEDIUM |
-| [CVE-2022-32287](https://nvd.nist.gov/vuln/detail/CVE-2022-32287) | Mongoose <7.7 — WS frame parsing OOB read | HIGH |
+| [CVE-2020-7662](https://nvd.nist.gov/vuln/detail/CVE-2020-7662) | `websocket-extensions` (Node.js) < 0.1.4 , ReDoS via `Sec-WebSocket-Extensions` header | HIGH (7.5) |
+| [CVE-2021-32640](https://nvd.nist.gov/vuln/detail/CVE-2021-32640) | `ws` (npm) 5.0.0-6.2.1, 7.0.0-7.4.5 , ReDoS via `Sec-WebSocket-Protocol` header | MEDIUM (5.3) |
+| [CVE-2024-37890](https://nvd.nist.gov/vuln/detail/CVE-2024-37890) | `ws` (npm) < 8.17.1 , DoS via requests exceeding `server.maxHeadersCount` | HIGH (7.5) |
+| [CVE-2023-32695](https://nvd.nist.gov/vuln/detail/CVE-2023-32695) | `socket.io-parser` 3.4.0-3.4.2, 4.0.4-4.2.2 , DoS via crafted packet (uncaught exception) | HIGH (7.5) |
 
-The check is a *fingerprint* match, not active exploitation. Always verify the version manually before reporting.
+The check is a *fingerprint* match against `Server`/`X-Powered-By` response
+headers, not active exploitation. A match is a hint, not proof , always
+verify the installed version against the affected range before reporting.
+PRs adding more verified WebSocket CVEs (with NVD link + primary advisory)
+are welcome.
 
 ## Where the WebSocket lives, by device class
 
@@ -193,7 +199,7 @@ wsdoscore/
 ├── common.py           # Metrics, URL helpers, Finding dataclass
 ├── recon.py            # probe command
 ├── stress.py           # 5 attack modes
-├── presets.py          # 18 vendor presets
+├── presets.py          # 8 vendor presets (each with source citation)
 ├── report.py           # JSON / pretty / Markdown emitters
 └── vuln/
     ├── __init__.py     # CHECK_REGISTRY
